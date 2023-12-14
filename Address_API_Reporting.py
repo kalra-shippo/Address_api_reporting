@@ -28,6 +28,7 @@ pip install pandas_ml
 # MAGIC and object_created <= date_add(current_date,-10)
 # MAGIC and was_test = 'false'
 # MAGIC and object_state = 'VALID'
+# MAGIC -- and id = "967962797"
 # MAGIC ),
 # MAGIC
 # MAGIC
@@ -50,6 +51,15 @@ pip install pandas_ml
 # MAGIC   where ex.id in (select distinct extra_id from rating_surcharge)
 # MAGIC ),
 # MAGIC
+# MAGIC invoice_item as (
+# MAGIC select id, transaction_id, amount as ii_amount, type_id  from `prod-catalog`.`seg01`.`api_invoiceitem`
+# MAGIC where object_created >= date_add(current_date,-110)
+# MAGIC and object_created <= date_add(current_date,-10)
+# MAGIC ),
+# MAGIC
+# MAGIC ii_type as(
+# MAGIC select * from `prod-catalog`.`seg01`.`billing_invoiceitemtype`
+# MAGIC ),
 # MAGIC
 # MAGIC shipment as(
 # MAGIC select id shipment_id, object_owner_id, address_from_id, address_to_id, extra from `prod-catalog`.`seg01`.`api_shipment_202308` 
@@ -65,6 +75,10 @@ pip install pandas_ml
 # MAGIC
 # MAGIC union all
 # MAGIC select id shipment_id, object_owner_id,address_from_id, address_to_id, extra from `prod-catalog`.`seg01`.`api_shipment_202311`
+# MAGIC where object_purpose = 'PURCHASE' and object_created >= date_add(current_date,-110) and object_created <= date_add(current_date,-10)
+# MAGIC
+# MAGIC union all
+# MAGIC select id shipment_id, object_owner_id,address_from_id, address_to_id, extra from `prod-catalog`.`seg01`.`api_shipment_202312`
 # MAGIC where object_purpose = 'PURCHASE' and object_created >= date_add(current_date,-110) and object_created <= date_add(current_date,-10)
 # MAGIC
 # MAGIC ),
@@ -96,7 +110,13 @@ pip install pandas_ml
 # MAGIC ),
 # MAGIC
 # MAGIC trackables as
-# MAGIC (SELECT distinct id, transaction_id, track_status_id
+# MAGIC (
+# MAGIC SELECT distinct id, transaction_id, track_status_id
+# MAGIC FROM `prod-catalog`.seg01.track_trackable_202312
+# MAGIC -- WHERE transaction_id IN (SELECT distinct id FROM txns)
+# MAGIC UNION ALL
+# MAGIC
+# MAGIC SELECT distinct id, transaction_id, track_status_id
 # MAGIC FROM `prod-catalog`.seg01.track_trackable_202311
 # MAGIC -- WHERE transaction_id IN (SELECT distinct id FROM txns)
 # MAGIC UNION ALL
@@ -162,7 +182,6 @@ pip install pandas_ml
 # MAGIC ),
 # MAGIC
 # MAGIC
-# MAGIC
 # MAGIC final as(
 # MAGIC select 
 # MAGIC tt.transaction_id
@@ -172,6 +191,9 @@ pip install pandas_ml
 # MAGIC , r.rate_id
 # MAGIC , r.provider_id
 # MAGIC , r.days
+# MAGIC , ii.id
+# MAGIC , ii.ii_amount 
+# MAGIC , iit.name as ii_type
 # MAGIC , s.shipment_id
 # MAGIC , s.object_owner_id
 # MAGIC , s.address_to_id
@@ -212,6 +234,8 @@ pip install pandas_ml
 # MAGIC inner join rate r on r.rate_id = t.api_rate_id
 # MAGIC left join rating_surcharge rs on rs.api_rate_id = r.rate_id 
 # MAGIC left join extra ex on  ex.id = rs.extra_id
+# MAGIC left join invoice_item ii on ii.transaction_id = t.id
+# MAGIC left join ii_type iit on iit.id = ii.type_id
 # MAGIC left join trackables tt on tt.transaction_id = t.id
 # MAGIC left join track_sub_status ts on ts.track_status_id = tt.track_status_id
 # MAGIC left join shipment s on s.shipment_id = r.shipment_id 
@@ -333,13 +357,14 @@ display(result_df_with_totals)
 
 from pyspark.sql.functions import sum, count, avg
 
-pivot_surcharge_df = result_df.groupBy("carrier", "address_validation_flag").agg(sum('surcharge_amt').alias("sum_surcharge_amt"), count(when(result_df['surcharge_amt'].isNotNull(), True)).alias('count_amount_not_null'), count(when(result_df['surcharge_amt'].isNull(), True)).alias('count_amount_null'))
+filtered_df = result_df.filter((result_df.delivery_issues == "address_issue") | (result_df.delivery_issues == "other_issue"))
+
+pivot_surcharge_df = filtered_df.groupBy("carrier", "address_validation_flag").agg(sum('surcharge_amt').alias("sum_surcharge_amt"), count(when(filtered_df['surcharge_amt'].isNotNull(), True)).alias('count_amount_not_null'), count(when(filtered_df['surcharge_amt'].isNull(), True)).alias('count_amount_null'))
 
 # Calculate percentage columns
 avg_overall = (col("sum_surcharge_amt") / col("count_amount_not_null")).alias("avg_per_transaction")
 total_count = (col("count_amount_not_null") + col("count_amount_null")).alias("total_count")
 percentage_overall = (col("count_amount_not_null") / col("total_count") * 100).alias("percentage_overall")
-# percentage_specific = (col("transaction_count") / col("transaction_count") * 100).alias("percentage_specific")
 
 # percentage columns to the DataFrame
 pivot_surcharge_df_with_percentage = (
@@ -412,7 +437,7 @@ print('p-value = {:.4f}'.format(p_val))
 
 # COMMAND ----------
 
-from pyspark.sql import functions as F
+
 
 column_to_count = "days"
 df1 = df1.na.drop(subset=["servicelevel_name"])
