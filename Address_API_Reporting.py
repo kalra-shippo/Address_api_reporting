@@ -33,15 +33,10 @@ pip install pandas_ml
 # MAGIC
 # MAGIC
 # MAGIC rate as
-# MAGIC (select r.object_owner_id, r.id as rate_id, r.shipment_id, r.provider_id, r.days, r.servicelevel_id,
-# MAGIC case when mca.ext_account_id LIKE 'shippo_master_usps_%' OR mca.ext_account_id = 'shippo_cpp_partner_usps_master_10000000000035'
-# MAGIC OR api_account.object_owner_id = 11211 OR mca.object_owner_id = 11211 OR mca.ext_account_id IS NOT NULL then 'shippo_master' else 'not_shippo_master' end carrier_account_type
-# MAGIC ,r.account_id, mca.id mca_id
+# MAGIC (select r.object_owner_id, r.id as rate_id, r.shipment_id, r.provider_id, r.days, r.servicelevel_id
 # MAGIC from `prod-catalog`.seg01.api_rate r
-# MAGIC LEFT JOIN `prod-catalog`.seg01.api_account api_account on api_account.id  = r.account_id
-# MAGIC LEFT JOIN `prod-catalog`.seg01.api_mastercarrieraccount mca ON mca.id = api_account.master_carrier_account_id
-# MAGIC where r.object_created >= date_add(current_date,-110)
-# MAGIC and r.object_created <= date_add(current_date,-10)
+# MAGIC where object_created >= date_add(current_date,-110)
+# MAGIC and object_created <= date_add(current_date,-10)
 # MAGIC and r.id in (select distinct api_rate_id from txns)
 # MAGIC ),
 # MAGIC
@@ -196,9 +191,6 @@ pip install pandas_ml
 # MAGIC , r.rate_id
 # MAGIC , r.provider_id
 # MAGIC , r.days
-# MAGIC , r.carrier_account_type
-# MAGIC -- , r.account_id
-# MAGIC , r.mca_id
 # MAGIC , ii.id
 # MAGIC , ii.ii_amount 
 # MAGIC , iit.name as ii_type
@@ -280,7 +272,7 @@ df1 = _sqldf
 
 # COMMAND ----------
 
-# 4. Distance calculation.
+# MAGIC # 4. Distance calculation.
 
 def haversine_distance(lat1, lon1, lat2, lon2):
     R = 3958.0  # Earth radius in miles
@@ -365,7 +357,7 @@ display(result_df_with_totals)
 
 from pyspark.sql.functions import sum, count, avg
 
-filtered_df = result_df.filter((result_df.delivery_issues == "address_issue") | (result_df.delivery_issues == "other_issue") & (result_df.carrier_account_type == 'shippo_master'))
+filtered_df = result_df.filter((result_df.delivery_issues == "address_issue") | (result_df.delivery_issues == "other_issue"))
 
 pivot_surcharge_df = filtered_df.groupBy("carrier", "address_validation_flag").agg(sum('surcharge_amt').alias("sum_surcharge_amt"), count(when(filtered_df['surcharge_amt'].isNotNull(), True)).alias('count_amount_not_null'), count(when(filtered_df['surcharge_amt'].isNull(), True)).alias('count_amount_null'))
 
